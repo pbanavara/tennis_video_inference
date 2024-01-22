@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 9
+names: ['ball', 'left_foot', 'left_hand', 'left_leg', 'racket', 'right_foot', 'right_hand', 'right_leg', 'wrist']
+
+roboflow:
+  workspace: tennislearn
+  project: tennis-d6ugg
+  version: 2
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/tennislearn/tennis-d6ugg/dataset/2
