@@ -20,7 +20,7 @@
 	
 * Market size
   
-  (87M unique tennis players)[https://tennisracketball.com/guide/how-many-people-play-tennis/]
+  [87M unique tennis players](https://tennisracketball.com/guide/how-many-people-play-tennis/)
   25M in USA
   8M in India
   40% over the age of 35.
@@ -31,3 +31,14 @@
   1 SEO 1 marketing and 1 
   3 years to reach 100K
   
+### Finding on videos, object detection v/s object tracking
+[Github issues on YOLO](https://github.com/ultralytics/ultralytics/issues/3357)
+
+* One suggested option is action recognition but I don't think action recognition is the key, key is finding the angles in a single frame.
+* What is the trigger to find those angles ?
+  * In tennis it's when the ball makes contact with the racket. Rest of the body angle should be in accordance with the pros.
+  * In squat you could do something like this
+	* The back angle or the angle between hip and shoulder is straight, when standing.
+	* The angle between hip and knee when the knee is fully bent - is something.
+	* The angle when the knee is fully bent the back should have a particular angle - that can be the delta.
+	
