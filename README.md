@@ -41,4 +41,4 @@
 	* The back angle or the angle between hip and shoulder is straight, when standing.
 	* The angle between hip and knee when the knee is fully bent - is something.
 	* The angle when the knee is fully bent the back should have a particular angle - that can be the delta.
-	
+

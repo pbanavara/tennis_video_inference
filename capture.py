@@ -8,10 +8,10 @@ from ultralytics import YOLO
 import numpy as np
 import torch
 import math
+import argparse
 
-mps_device = torch.device("mps")
 
-model = YOLO("/Users/pbanavara/dev/tennis_video_inference/model_train/runs/detect/train14/weights/best.pt")
+model = YOLO("/Users/pbanavara/dev/tennis_video_inference/model_train/runs/detect/train17/weights/best.pt")
 #model = YOLO("yolov8n-pose.pt")
 
 def analyze_video(video_mov):
@@ -66,14 +66,15 @@ def find_racket_ball_contact(frame, bboxes, classes):
     m = {}
     boxes_classes = zip(bboxes,classes)
     for box, cls in boxes_classes:
-        if cls == 0 or cls == 4:
+        if cls == 1 or cls == 5: #remove this hard coding
             x, y, x2, y2 = box
             centre = ((x + x2) // 2, (y + y2)//2)
             m[cls] = centre
     # calculate the distance between the centres and set a threshold if only racket  and ball are present
-    if len(m) == 2:
-        dist = calculate_racket_and_ball_distance(m[0], m[4])
-        freeze_frame(frame, m[0], m[4], dist)
+    dist = 0
+    if len(m) == 2: # This is 2 because we are looking for only the racket and the ball
+        dist = calculate_racket_and_ball_distance(m[1], m[5])
+        freeze_frame(frame, m[1], m[1], dist)
         
     
 def print_frame_bboxes(frame):
@@ -81,12 +82,12 @@ def print_frame_bboxes(frame):
     result = results[0]
     bboxes = np.array(result.boxes.xyxy.cpu(), dtype="int")
     classes = np.array(result.boxes.cls.cpu(), dtype="int")
-
+    print(bboxes, classes)
     find_racket_ball_contact(frame, bboxes,classes)
 
     """
     for bbox,cls in zip(bboxes, classes):
-        if cls == 0 or cls == 4:
+        if cls == 1 or cls == 5:
             x, y, x2, y2 = bbox
             cv2.imshow('Frame', frame) # OpenCV uses BGR, whereas matplotlib uses RGB
             cv2.rectangle(frame, (x, y), (x2, y2), (0, 0, 225), 4)
@@ -122,14 +123,20 @@ def get_youtube_video(url):
     
         
 if __name__ == "__main__":
-    inference_video = "/Users/pbanavara/dev/tennis_video_inference/video_inference.mov"
+    parser = argparse.ArgumentParser(description = "Inference local video")
+    parser.add_argument('video', metavar = 'video', type=str, help = "Local video location for inference")
+    args = parser.parse_args()
+
+    print(args)
+    
     image = "/Users/pbanavara/dev/tennis_video_inference/high_res_images/stills/my-film-001712.png"
     
     url = "https://www.youtube.com/watch?v=ugQYbOsN5yI"
     url_2 = "https://youtu.be/FZSqzPXs43I?t=18"
     #print(os.path.exists(file_name))
-    analyze_video(inference_video)
-    img = cv2.imread(image, cv2.IMREAD_COLOR)
+    
+    analyze_video(args.video)
+    
     #capture_single_image(img)
     #get_youtube_video(url_2)
     #frame = get_youtube_video(url)
