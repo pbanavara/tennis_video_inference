@@ -32,7 +32,7 @@ def analyze_video(video_mov, model, pose_flag):
             if not pose_flag:
                 print_frame_bboxes(frame, model)
             else:
-                overlay_poses(frame)
+                overlay_poses(frame, model)
         else:
             break
         
@@ -112,7 +112,7 @@ def print_frame_bboxes(frame, model):
     
 
 
-def overlay_poses(frame):
+def overlay_poses(frame, model):
     """
     The pose detection points are in this order
     {
@@ -194,9 +194,6 @@ def get_youtube_video(url, model):
     cap = cap_from_youtube(url, '')
     count = 0
     while True:
-        count += 1
-        if count >= 2:
-            break
         ret, frame = cap.read()
         if ret:
             overlay_poses(frame, model)

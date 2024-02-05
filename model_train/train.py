@@ -3,7 +3,7 @@ import torch
 import argparse
 
 mps_device = torch.device("mps")
-model = YOLO("../yolov8m.pt")
+model = YOLO("yolov8n-pose.pt")
 model.to(mps_device)
 
 
