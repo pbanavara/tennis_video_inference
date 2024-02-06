@@ -175,16 +175,16 @@ def overlay_poses(frame, model):
 
     def draw_angle_line(ann, angle, start, mid, end):
         
-        ann.plot_angle_and_count_and_stage(angle, 1, "stg", keypoints[7])
+        ann.plot_angle_and_count_and_stage(angle, 1, "stg", mid)
         #ann.plot_angle_and_count_and_stage(right_angle, 1, "stg", keypoints[8])
         cv2.line(ann.result(), start, mid, [0, 0, 255], thickness=2, lineType=cv2.LINE_AA)
         cv2.line(ann.result(), mid, end, [255, 255, 0], thickness=2, lineType=cv2.LINE_AA)
         cv2.imshow("Annotated frame", ann.result())
 
-    draw_angle_line(ann, left_angle, keypoints[5], keypoints[7], keypoints[9])
+    #draw_angle_line(ann, left_angle, keypoints[5], keypoints[7], keypoints[9])
     draw_angle_line(ann, right_angle, keypoints[6], keypoints[8], keypoints[10])
     
-    k = cv2.waitKey(1)
+    k = cv2.waitKey(4)
     if k == 113:
         return
     
