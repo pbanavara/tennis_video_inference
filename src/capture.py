@@ -95,7 +95,7 @@ def print_frame_bboxes(frame, model):
     bboxes = np.array(result.boxes.xyxy.cpu(), dtype="int")
     classes = np.array(result.boxes.cls.cpu(), dtype="int")
     print(bboxes, classes)
-    #find_racket_ball_contact(frame, bboxes,classes)
+    find_racket_ball_contact(frame, bboxes,classes)
 
     
     for bbox,cls in zip(bboxes, classes):
@@ -126,24 +126,18 @@ def overlay_poses(frame, model):
     compare the key angles such as the one on the left hand and right hand when the ball makes
     contact with the racket
     """
-    overlay_dict = {}
-    overlay_dict[0] = 'nose'
-    overlay_dict[1] = 'nose'
+    
     results = model(frame, device=mps_device)
     annotated_frame = results[0].plot()
 
     boxes = results[0].boxes
     names = results[0].boxes.cls
 
-    for box, name in zip(boxes, names):
-        print("Bounding box {}".format(box))
-        print("Name {}".format(name))
-
     keypoints = results[0].keypoints.xy.cpu().numpy()[0]
     keypoints = [[int(k[0]), int(k[1])] for k in keypoints]
+    
     ann = Annotator(frame)
-    #ann.draw_specific_points(keypoints, indices=[5, 7, 6, 8, 9, 10], shape=(640, 640), radius=2)
-
+    
     def get_angle(m_i, t_i, b_i):
         """
          Return the angle between 3 points of the indices in the keypoints array
@@ -164,29 +158,23 @@ def overlay_poses(frame, model):
     left_angle = get_angle(7, 5, 9)
     right_angle = get_angle(8, 6, 10)
     
-    """
-    for i, kp in enumerate(keypoints):
-        x = int(kp[0])
-        y = int(kp[1])
-        if i in [5,7,9]:
-            ann.text((x,y), str(angle))
-            cv2.imshow("Frame", ann.result())
-    """
-
+    
     def draw_angle_line(ann, angle, start, mid, end):
-        
-        ann.plot_angle_and_count_and_stage(angle, 1, "stg", mid)
-        #ann.plot_angle_and_count_and_stage(right_angle, 1, "stg", keypoints[8])
         cv2.line(ann.result(), start, mid, [0, 0, 255], thickness=2, lineType=cv2.LINE_AA)
         cv2.line(ann.result(), mid, end, [255, 255, 0], thickness=2, lineType=cv2.LINE_AA)
+        cv2.putText(ann.result(), str(int(angle)), (mid[0], mid[1]), cv2.FONT_HERSHEY_PLAIN, 2, (255, 255, 0), 1)
         cv2.imshow("Annotated frame", ann.result())
-
+        k = cv2.waitKey(1)
+        if k == ord('q'):
+            return
+        if k == ord('p'): # For pause
+            cv2.waitKey(-1)
+    
+    # Comment for specific angles right hand, left hand etc - this needs to improve
+    
     #draw_angle_line(ann, left_angle, keypoints[5], keypoints[7], keypoints[9])
     draw_angle_line(ann, right_angle, keypoints[6], keypoints[8], keypoints[10])
     
-    k = cv2.waitKey(4)
-    if k == 113:
-        return
     
         
 
