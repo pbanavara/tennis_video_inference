@@ -33,7 +33,7 @@ class AnalyzeVideo(object):
         else:
             self.mps_device = torch.device("mps")
     
-    def analyze_video(self, video_mov, pose_flag):
+    def analyze_video(self, video_mov, pose_flag, web_flag):
         """Analyzes a given standalone video and overlays poses on the given video
 
         Args:
@@ -50,7 +50,15 @@ class AnalyzeVideo(object):
                     self.print_frame_bboxes(frame, model)
                 else:
                     model = self.choose_model(True)
-                    self.overlay_poses(frame, model)
+                    result = self.overlay_poses(frame, model)
+                    if web_flag:
+                        ret, buffer = cv2.imencode('.jpg', cv2.flip(result,1))
+                        frame = buffer.tobytes()
+                        yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                    else:
+                        cv2.imshow("Frame", result)
+
             else:
                  break
 
@@ -176,8 +184,9 @@ class AnalyzeVideo(object):
         cv2.line(ann.result(), start, mid, color, thickness=2, lineType=cv2.LINE_AA)
         cv2.line(ann.result(), mid, end, color, thickness=2, lineType=cv2.LINE_AA)
         cv2.putText(ann.result(), str(int(angle)), (mid[0], mid[1]), cv2.FONT_HERSHEY_PLAIN, 2, (255,255,255), 1)
-        cv2.imshow("Annotated frame", ann.result())
+        #cv2.imshow("Annotated frame", ann.result())
         # Check the angle and tell the difference
+        return ann.result()
 
 
     def overlay_poses(self, frame, model):
@@ -215,19 +224,20 @@ class AnalyzeVideo(object):
             # Comment for specific angles right hand, left hand etc - this needs to improve
 
             #draw_angle_line(ann, left_angle, keypoints[5], keypoints[7], keypoints[9])
-        self.draw_angle_line(ann, right_hand_angle, keypoints[6], keypoints[8], keypoints[10], [255, 255, 250])
+        result = self.draw_angle_line(ann, right_hand_angle, keypoints[6], keypoints[8], keypoints[10], [255, 255, 250])
         
-        self.draw_angle_line(ann, right_leg_angle, keypoints[12], keypoints[14], keypoints[16], [255, 255, 240] )
-        self.draw_angle_line(ann, left_leg_angle, keypoints[11], keypoints[13], keypoints[15], [255, 255, 230] )
+        result = self.draw_angle_line(ann, right_leg_angle, keypoints[12], keypoints[14], keypoints[16], [255, 255, 240] )
+        result = self.draw_angle_line(ann, left_leg_angle, keypoints[11], keypoints[13], keypoints[15], [255, 255, 230] )
             #draw_angle_line(ann, left_hip_angle, keypoints[5], keypoints[6], keypoints[11], [255, 255, 220] )
-        self.draw_angle_line(ann, left_hip_angle, keypoints[6], keypoints[11], keypoints[13], [255, 255, 220] )
+        result = self.draw_angle_line(ann, left_hip_angle, keypoints[6], keypoints[11], keypoints[13], [255, 255, 220] )
 
         if right_hand_angle > 10:
-            cv2.putText(ann.result(), "Right hand is bent during forehand", (keypoints[8][0], keypoints[8][1]), cv2.FONT_HERSHEY_PLAIN, 2, (100,100,100), 1)
+            cv2.putText(result, "Right hand is bent during forehand", (keypoints[8][0], keypoints[8][1]), cv2.FONT_HERSHEY_PLAIN, 2, (100,100,100), 1)
 
         k = cv2.waitKey(1)
         if k == ord('p'):
             cv2.waitKey(-1)
+        return result
 
     def get_youtube_video(self, url, pose_flag):
         """Used for processing online youtube videos
@@ -288,7 +298,8 @@ if __name__ == "__main__":
     elif single_image:
         analyze_vid.capture_single_iamge(single_image, pose_flag)
     else:
-        analyze_vid.analyze_video(args.video, pose_flag)
+        analyze_vid.analyze_video(args.video, 
+                                  pose_flag=pose_flag, web_flag=False)
     
 
     
