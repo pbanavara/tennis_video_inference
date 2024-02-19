@@ -1,5 +1,3 @@
-#!/Users/pbanavara/miniforge3/envs/pytorch/bin/python
-
 import cv2
 import matplotlib.pyplot as plt
 import os
@@ -13,7 +11,10 @@ import ultralytics
 from ultralytics.engine.results import Results
 from ultralytics.utils.plotting import Annotator
 from ultralytics.utils import plotting
-
+import time
+import logging
+import boto3
+import common
 
 
 class AnalyzeVideo(object):
@@ -32,16 +33,35 @@ class AnalyzeVideo(object):
                 print("MPS not available because the current MacOS version is not 12.3+ " + "and/or you do not have an MPS-enabled device on this machine.")
         else:
             self.mps_device = torch.device("mps")
+        self.fourcc = cv2.VideoWriter_fourcc(*'MP4V')
+        self.fps = 20
+
+
+    def upload_to_s3(self, output_file_name):
+         s3 = boto3.resource('s3')
+         try :
+             with open(output_file_name, 'rb') as data:
+                 s3.Bucket('tennisvideosbucket').put_object(Key = output_file_name, Body = data)
+         except Exception as e:
+             logging.error(e)
+             return common.S3_FAIL
+         return common.S3_SUCCESS    
     
-    def analyze_video(self, video_mov, pose_flag, web_flag):
+    def analyze_video(self, video_mov, pose_flag, web_flag, output_file_name):
         """Analyzes a given standalone video and overlays poses on the given video
 
         Args:
             video_mov (_type_): local video file
             model (_type_): Pose or object detection model
-            pose_flag (_type_): True for pose detection
+            pose_flag (_type_): True for podse detection
         """
+        
         cap = cv2.VideoCapture(video_mov)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        self.fps = fps * 0.25
+        print(fps, self.fps)
+        out = cv2.VideoWriter(output_file_name, self.fourcc, self.fps, (int(cap.get(3)), int(cap.get(4))))
+    
         while cap.isOpened():
             ret, frame = cap.read()
             if ret:
@@ -52,16 +72,58 @@ class AnalyzeVideo(object):
                     model = self.choose_model(True)
                     result = self.overlay_poses(frame, model)
                     if web_flag:
-                        ret, buffer = cv2.imencode('.jpg', cv2.flip(result,1))
-                        frame = buffer.tobytes()
-                        yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                        if result.any():
+                            out.write(result)
+                        else:
+                            out.write(frame)
+                        #yield (b'--frame\r\n'
+                       #b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
                     else:
+                        logging.debug("Encoding failed")
                         cv2.imshow("Frame", result)
 
             else:
                  break
 
+        cap.release()
+        out.release()
+        result = self.upload_to_s3(output_file_name)
+        
+        
+
+    def get_youtube_video(self, url, pose_flag, web_flag):
+        """Used for processing online youtube videos
+
+        Args:
+            url (_type_): _description_
+            model (_type_): _description_
+        """
+        cap = cap_from_youtube(url, '')
+        
+        output_file = "fed_out.mp4"
+        out = cv2.VideoWriter(output_file, self.fourcc, self.fps, (int(cap.get(3)), int(cap.get(4))))
+        while True:
+            ret, frame = cap.read()
+            if ret:
+                if pose_flag:
+                    model = self.choose_model(True)
+                    result = self.overlay_poses(frame, model)
+                    if web_flag:
+                        if result.any():
+                            ret, buffer = cv2.imencode('.jpg', result)
+                            out.write(result)
+                        else:
+                            ret, buffer = cv2.imencode('.jpg', frame)
+                        frame = buffer.tobytes()
+                        yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                    else:
+                        cv2.imshow("Frame", result)
+                else:
+                    model = self.choose_model(False)
+                    self.print_frame_bboxes(frame, model)
+            else:
+                break
         cap.release()
 
     def capture_single_image(self, frame, pose_flag):
@@ -205,9 +267,6 @@ class AnalyzeVideo(object):
         """
 
         results = model(frame, device=self.mps_device)
-        annotated_frame = results[0].plot()
-
-        boxes = results[0].boxes
         names = results[0].boxes.cls
 
         keypoints = results[0].keypoints.xy.cpu().numpy()[0]
@@ -215,7 +274,6 @@ class AnalyzeVideo(object):
 
         ann = Annotator(frame)
         if names.shape[0] > 0:
-            print("Shapes are fine", names.shape)
             right_hand_angle = self.get_angle(8, 6, 10, keypoints)
             left_leg_angle = self.get_angle(11, 13, 15, keypoints)
             right_leg_angle = self.get_angle(12, 14, 16, keypoints)
@@ -224,41 +282,24 @@ class AnalyzeVideo(object):
             # Comment for specific angles right hand, left hand etc - this needs to improve
 
             #draw_angle_line(ann, left_angle, keypoints[5], keypoints[7], keypoints[9])
-        result = self.draw_angle_line(ann, right_hand_angle, keypoints[6], keypoints[8], keypoints[10], [255, 255, 250])
-        
-        result = self.draw_angle_line(ann, right_leg_angle, keypoints[12], keypoints[14], keypoints[16], [255, 255, 240] )
-        result = self.draw_angle_line(ann, left_leg_angle, keypoints[11], keypoints[13], keypoints[15], [255, 255, 230] )
-            #draw_angle_line(ann, left_hip_angle, keypoints[5], keypoints[6], keypoints[11], [255, 255, 220] )
-        result = self.draw_angle_line(ann, left_hip_angle, keypoints[6], keypoints[11], keypoints[13], [255, 255, 220] )
+            result = self.draw_angle_line(ann, right_hand_angle, keypoints[6], keypoints[8], keypoints[10], [255, 255, 250])
+            
+            result = self.draw_angle_line(ann, right_leg_angle, keypoints[12], keypoints[14], keypoints[16], [255, 255, 240] )
+            result = self.draw_angle_line(ann, left_leg_angle, keypoints[11], keypoints[13], keypoints[15], [255, 255, 230] )
+                #draw_angle_line(ann, left_hip_angle, keypoints[5], keypoints[6], keypoints[11], [255, 255, 220] )
+            result = self.draw_angle_line(ann, left_hip_angle, keypoints[6], keypoints[11], keypoints[13], [255, 255, 220] )
 
-        if right_hand_angle > 10:
-            cv2.putText(result, "Right hand is bent during forehand", (keypoints[8][0], keypoints[8][1]), cv2.FONT_HERSHEY_PLAIN, 2, (100,100,100), 1)
+            if right_hand_angle > 10:
+                cv2.putText(result, "Right hand is bent during forehand", (keypoints[8][0], keypoints[8][1]), cv2.FONT_HERSHEY_PLAIN, 2, (100,100,100), 1)
 
-        k = cv2.waitKey(1)
-        if k == ord('p'):
-            cv2.waitKey(-1)
-        return result
+            k = cv2.waitKey(1)
+            if k == ord('p'):
+                cv2.waitKey(-1)
+            return result
+        else:
+            # No keypoints found return the unprocessed frame
+            return ann.result()
 
-    def get_youtube_video(self, url, pose_flag):
-        """Used for processing online youtube videos
-
-        Args:
-            url (_type_): _description_
-            model (_type_): _description_
-        """
-        cap = cap_from_youtube(url, '')
-        while True:
-            ret, frame = cap.read()
-            if ret:
-                if pose_flag:
-                    model = self.choose_model(True)
-                    self.print_frame_bboxes(frame, model)
-                else:
-                    model = self.choose_model(False)
-                    self.overlay_poses(frame, model)
-            else:
-                break
-            cap.release()
 
     def choose_model(self, pose_flag):
         """Choose between pose and object detection models
@@ -275,31 +316,3 @@ class AnalyzeVideo(object):
             model = YOLO("yolov8n-pose.pt")
 
         return model
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description = "Inference local video")
-    parser.add_argument('video', metavar = 'video', type=str, help = "Local video location for inference")
-    parser.add_argument('pose', metavar = 'pose', type=bool, nargs='?', default=False, help = "Pass true for pose detection, defaults to object detection")
-    parser.add_argument('yt', metavar='yt', type=str, nargs="?", default=None, help = "Enter an optional youtube url , to supersede the local video")
-    parser.add_argument('single_image', metavar='single_image', nargs="?", type=str, help = "Enter the location of single image for single image inference")
-    
-    args = parser.parse_args()
-    
-    #url = "https://www.youtube.com/watch?v=ugQYbOsN5yI"
-    #url_2 = "https://youtu.be/FZSqzPXs43I?t=18"
-
-    pose_flag = args.pose
-    yt = args.yt
-    single_image = args.single_image
-
-    analyze_vid = AnalyzeVideo() 
-    if yt is not None:
-        analyze_vid.get_youtube_video(args.yt, pose_flag)
-    elif single_image:
-        analyze_vid.capture_single_iamge(single_image, pose_flag)
-    else:
-        analyze_vid.analyze_video(args.video, 
-                                  pose_flag=pose_flag, web_flag=False)
-    
-
-    

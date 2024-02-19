@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile 
+from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from tempfile import NamedTemporaryFile
@@ -8,53 +8,38 @@ import asyncio
 import os
 from capture import AnalyzeVideo
 import cv2
+from fastapi.middleware.cors import CORSMiddleware
+import common
+import time
+import base64
+import traceback
 
 class Video(BaseModel):
     name: str
 
 
 app = FastAPI()
+origins = [
+    "http://localhost:3000",
+    
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 @app.get("/")
 def root():
     return {"Hello world"}
-
-def process_video(video_file_name):
-    avd = AnalyzeVideo()
-    cap = cv2.VideoCapture(video_file_name)
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if ret:
-            model = avd.choose_model(True)
-            yield avd.overlay_poses(frame, model)
-        else:
-            break
-
-        cap.release()
-
-@app.post("/async_video")
-async def post_video(file: UploadFile = File(...)):
-    try:
-        async with aiofiles.tempfile.NamedTemporaryFile("wb", delete=False) as temp:
-            try:
-                contents = await file.read()
-                await temp.write(contents)
-            except Exception:
-                return {"message": "There was an error uploading the file"}
-            finally:
-                await file.close()
-        
-        res = await run_in_threadpool(process_video, temp.name)  # Pass temp.name to VideoCapture()
-    except Exception:
-        return {"message": "There was an error processing the file"}
-    finally:
-        #os.remove(temp.name)
-        print("Done")
-
-    return res
+    
 
 @app.post("/video")
-def detect_faces(file: UploadFile = File(...)):
+async def upload_video(email: str = Form(...), file: UploadFile = File(...)):
     temp = NamedTemporaryFile("wb", dir="/tmp", delete=False)
     print(temp.name)
     try:
@@ -68,18 +53,50 @@ def detect_faces(file: UploadFile = File(...)):
             file.file.close()
         
     except Exception as e:
-        return {"message": e.with_traceback()}
+        return {"email": email, "error": e.with_traceback()}
     finally:
         #temp.close()  # the `with` statement above takes care of closing the file
         #os.remove(temp.name)
-        print("Done")
-        
-    return {"Done uploading" : temp.name}
+        print("Done writing input file")
+    try:
+        email_time = email + str(int(time.time()))
+        out_file_name = base64.b64encode(email_time.encode())[:10].decode("utf-8") + ".mp4"
+        avd = AnalyzeVideo()
+        ret = avd.analyze_video(temp.name, pose_flag=True, web_flag=True, output_file_name=out_file_name)
+        print("Return value", ret)
+        return {"email": email, "out_file" : out_file_name}
+    except Exception as e:
+        print(traceback.format_exc())
+        return {"email": email, "error": common.FILE_PROCESS_FAIL }
 
-@app.post("/process_video")
-def process_video(video: Video):
+@app.get("/fetchVideo")
+def fetch_video(fileName: str):
+    """Placeholder method for retrieving a streaming video
+
+    Args:
+        video_file (str): _description_
+
+    Returns:
+        _type_: _description_
+    """
     avd = AnalyzeVideo()
-    return StreamingResponse(avd.analyze_video(video.name, 
+    print("File name", fileName)
+    return StreamingResponse(avd.analyze_video(fileName, 
+                                      pose_flag=True, web_flag=True),
+                    media_type = 'multipart/x-mixed-replace; boundary=frame')
+
+@app.get("/fetchYTvideo")
+def fetch_yt_video(url: str):
+    """Placeholder method for retrieving a streaming video
+
+    Args:
+        fileName (str): _description_
+
+    Returns:
+        _type_: _description_
+    """
+    avd = AnalyzeVideo()
+    return StreamingResponse(avd.get_youtube_video(url, 
                                       pose_flag=True, web_flag=True),
                     media_type = 'multipart/x-mixed-replace; boundary=frame')
 
