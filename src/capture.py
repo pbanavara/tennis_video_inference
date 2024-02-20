@@ -76,19 +76,16 @@ class AnalyzeVideo(object):
                             out.write(result)
                         else:
                             out.write(frame)
-                        #yield (b'--frame\r\n'
-                       #b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
                     else:
                         logging.debug("Encoding failed")
                         cv2.imshow("Frame", result)
-
             else:
                  break
 
         cap.release()
         out.release()
         result = self.upload_to_s3(output_file_name)
-        
+        return result
         
 
     def get_youtube_video(self, url, pose_flag, web_flag):
@@ -125,23 +122,6 @@ class AnalyzeVideo(object):
             else:
                 break
         cap.release()
-
-    def capture_single_image(self, frame, pose_flag):
-        """
-         Placeholder method for single image testing
-        """
-        if pose_flag:
-            model = self.choose_model(True)
-        else:
-            model = self.choose_model(False)
-
-        results = model(frame, device=self.mps_device)
-        result = results[0]
-        bboxes = np.array(result.boxes.xywh.cpu(), dtype="int")
-        classes = np.array(result.boxes.cls.cpu(), dtype="int")
-        self.find_racket_ball_contact(frame, bboxes, classes)
-        annotated_frame= results[0].plot()
-        cv2.imshow("Annotated frame", annotated_frame)
 
 
     def calculate_racket_and_ball_distance(self, r_centre, b_centre):
