@@ -15,6 +15,7 @@ import time
 import logging
 import boto3
 import common
+import os
 
 
 class AnalyzeVideo(object):
@@ -33,7 +34,7 @@ class AnalyzeVideo(object):
                 print("MPS not available because the current MacOS version is not 12.3+ " + "and/or you do not have an MPS-enabled device on this machine.")
         else:
             self.mps_device = torch.device("mps")
-        self.fourcc = cv2.VideoWriter_fourcc(*'MP4V')
+        self.fourcc = cv2.VideoWriter_fourcc(*'vp09')
         self.fps = 20
 
 
@@ -44,9 +45,10 @@ class AnalyzeVideo(object):
                  s3.Bucket('tennisvideosbucket').put_object(Key = output_file_name, Body = data)
          except Exception as e:
              logging.error(e)
-             return common.S3_FAIL
-         return common.S3_SUCCESS    
-    
+             raise Exception(e)
+         return common.S3_SUCCESS
+
+     
     def analyze_video(self, video_mov, pose_flag, web_flag, output_file_name):
         """Analyzes a given standalone video and overlays poses on the given video
 
@@ -58,8 +60,7 @@ class AnalyzeVideo(object):
         
         cap = cv2.VideoCapture(video_mov)
         fps = cap.get(cv2.CAP_PROP_FPS)
-        self.fps = fps * 0.25
-        print(fps, self.fps)
+        self.fps = fps * 0.30
         out = cv2.VideoWriter(output_file_name, self.fourcc, self.fps, (int(cap.get(3)), int(cap.get(4))))
     
         while cap.isOpened():
@@ -84,9 +85,18 @@ class AnalyzeVideo(object):
 
         cap.release()
         out.release()
-        result = self.upload_to_s3(output_file_name)
-        return result
-        
+        try:
+            if os.path.isfile(output_file_name):
+                result = self.upload_to_s3(output_file_name)
+            
+            else:
+                raise Exception("File creation failed")
+            return result
+        except Exception as e:
+            logging.debug(e)
+            raise Exception(e)
+
+    
 
     def get_youtube_video(self, url, pose_flag, web_flag):
         """Used for processing online youtube videos

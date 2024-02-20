@@ -16,6 +16,7 @@ import base64
 import traceback
 import redis
 import logging
+import hashlib
 
 class Video(BaseModel):
     name: str
@@ -44,8 +45,10 @@ def root():
     return {"Hello world"}
     
 def get_out_file_name(email, input_file):
-    email += input_file
-    out_file_name = base64.b64encode(email.encode())[:10].decode("utf-8") + ".mp4"
+    n_email = email + input_file
+    hash = hashlib.new('SHA256', bytes(n_email, encoding="utf-8")).digest()
+    b32_hash = base64.b32encode(hash).lower().rstrip(b'=').decode()[:10]
+    out_file_name = b32_hash + ".webm"
     return out_file_name
     
 
@@ -57,6 +60,10 @@ async def upload_video(email: str = Form(...), file: UploadFile = File(...)):
     temp = NamedTemporaryFile("wb", dir="/tmp", delete=False)
     if file.size > 20000000:
         raise HTTPException(status_code=413, detail="File size larger than 20MB")
+    out_file_name = get_out_file_name(email, file.filename)
+    if bytes(out_file_name, 'utf-8') in r.lrange(email, 0, -1):
+        return {"email": email, "out_file" : out_file_name}
+        
     try:
         try:
             contents = file.file.read()
@@ -74,8 +81,7 @@ async def upload_video(email: str = Form(...), file: UploadFile = File(...)):
         #os.remove(temp.name)
         logging.debug("Done writing input file", temp.name)
     try:
-        out_file_name = get_out_file_name(email, file.filename)
-            
+        
         avd = AnalyzeVideo()
         ret = avd.analyze_video(temp.name, pose_flag=True, web_flag=True, output_file_name=out_file_name)
         store_email_file(email, out_file_name)
@@ -83,7 +89,7 @@ async def upload_video(email: str = Form(...), file: UploadFile = File(...)):
         return {"email": email, "out_file" : out_file_name}
     except Exception as e:
         logging.error(traceback.format_exc())
-        return {"email": email, "error": common.FILE_PROCESS_FAIL }
+        raise HTTPException(status_code=500, detail = "Internal server error")
 
 @app.get("/fetchYTvideo")
 def fetch_yt_video(url: str):
