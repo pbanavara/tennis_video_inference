@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, Form, Response
+from fastapi import FastAPI, File, UploadFile, Form, Response, Request
 from fastapi.responses import StreamingResponse
 from fastapi.exceptions import HTTPException
 from pydantic import BaseModel
@@ -17,10 +17,10 @@ import traceback
 import redis
 import logging
 import hashlib
+from sse_starlette.sse import EventSourceResponse
 
 class Video(BaseModel):
     name: str
-
 
 app = FastAPI()
 origins = [
@@ -37,7 +37,13 @@ app.add_middleware(
 )
 logging.basicConfig(filename = "../log/callindra.log", encoding="utf-8", level=logging.DEBUG,
                     format='%(asctime)s %(message)s')
-r = redis.Redis(host = "localhost", port=6379, db=0)
+
+# Redis is used for storing client email and outputfiles as key:value and for
+# publishing and receiving video processing events
+
+r = redis.Redis(host = common.REDIS_HOST, port=common.REDIS_PORT, db=0)
+pub_sub = r.pubsub()
+pub_sub.subscribe(common.PUB_SUB_CHANNEL)
 
 @app.get("/")
 def root():
@@ -58,38 +64,47 @@ def store_email_file(email, out_file_name):
 @app.post("/video")
 async def upload_video(email: str = Form(...), file: UploadFile = File(...)):
     temp = NamedTemporaryFile("wb", dir="/tmp", delete=False)
-    if file.size > 20000000:
+    if file.size > 25000000:
         raise HTTPException(status_code=413, detail="File size larger than 20MB")
     out_file_name = get_out_file_name(email, file.filename)
     if bytes(out_file_name, 'utf-8') in r.lrange(email, 0, -1):
         return {"email": email, "out_file" : out_file_name}
-        
     try:
-        try:
-            contents = file.file.read()
-            with temp as f:
-                f.write(contents)
-        except Exception as e:
-            return {"message" : e.with_traceback()}
-        finally:
-            file.file.close()
-        
+        contents = file.file.read()
+        with temp as f:
+            f.write(contents)
     except Exception as e:
-        return {"email": email, "error": e.with_traceback()}
+        logging.debug(e.with_traceback())
+        return {"message" : e.with_traceback()}
     finally:
-        #temp.close()  # the `with` statement above takes care of closing the file
-        #os.remove(temp.name)
-        logging.debug("Done writing input file", temp.name)
+        file.file.close()
     try:
-        
         avd = AnalyzeVideo()
-        ret = avd.analyze_video(temp.name, pose_flag=True, web_flag=True, output_file_name=out_file_name)
+        await run_in_threadpool(lambda: avd.analyze_video(temp.name, pose_flag=True, web_flag=True, output_file_name=out_file_name))
         store_email_file(email, out_file_name)
-        logging.debug("Return value", ret)
         return {"email": email, "out_file" : out_file_name}
     except Exception as e:
         logging.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail = "Internal server error")
+
+"""
+@app.get("/videoProcessStatus")
+async def get_video_status(request: Request):
+    async def event_generator():
+        while True:
+            if await request.is_disconnected():
+                logging.debug("SSE connection disconneced")
+                break
+            message = pub_sub.get_message()
+            if message:
+                yield {
+                    "event": "process_status",
+                    "retry": 15000,
+                    "data": str(message['data']) + "dum"
+                }
+            await asyncio.sleep(1)
+    return EventSourceResponse(event_generator())
+"""
 
 @app.get("/fetchYTvideo")
 def fetch_yt_video(url: str):

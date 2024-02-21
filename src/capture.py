@@ -14,9 +14,10 @@ from ultralytics.utils import plotting
 import time
 import logging
 import boto3
+import botocore
 import common
 import os
-
+import redis
 
 class AnalyzeVideo(object):
     """Main class for processing and overlaying pose, mask or object detection on the main video
@@ -36,17 +37,21 @@ class AnalyzeVideo(object):
             self.mps_device = torch.device("mps")
         self.fourcc = cv2.VideoWriter_fourcc(*'vp09')
         self.fps = 20
+        self.r = redis.Redis(host=common.REDIS_HOST, port=common.REDIS_PORT, db=0)
+        
 
 
     def upload_to_s3(self, output_file_name):
-         s3 = boto3.resource('s3')
-         try :
+        s3 = boto3.resource('s3')
+        try :
              with open(output_file_name, 'rb') as data:
                  s3.Bucket('tennisvideosbucket').put_object(Key = output_file_name, Body = data)
-         except Exception as e:
-             logging.error(e)
-             raise Exception(e)
-         return common.S3_SUCCESS
+        except botocore.exceptions.ClientError as e:
+            logging.error(e)
+            raise e 
+        except botocore.exceptions.ParamValidationError as error:
+            raise ValueError('The parameters you provided are incorrect: {}'.format(error))
+        return common.S3_SUCCESS
 
      
     def analyze_video(self, video_mov, pose_flag, web_flag, output_file_name):
@@ -57,12 +62,11 @@ class AnalyzeVideo(object):
             model (_type_): Pose or object detection model
             pose_flag (_type_): True for podse detection
         """
-        
         cap = cv2.VideoCapture(video_mov)
         fps = cap.get(cv2.CAP_PROP_FPS)
         self.fps = fps * 0.30
         out = cv2.VideoWriter(output_file_name, self.fourcc, self.fps, (int(cap.get(3)), int(cap.get(4))))
-    
+        count = 0
         while cap.isOpened():
             ret, frame = cap.read()
             if ret:
@@ -75,6 +79,7 @@ class AnalyzeVideo(object):
                     if web_flag:
                         if result.any():
                             out.write(result)
+                            count += 1
                         else:
                             out.write(frame)
                     else:
@@ -88,7 +93,7 @@ class AnalyzeVideo(object):
         try:
             if os.path.isfile(output_file_name):
                 result = self.upload_to_s3(output_file_name)
-            
+                logging.debug("Processs done %s", output_file_name)
             else:
                 raise Exception("File creation failed")
             return result
