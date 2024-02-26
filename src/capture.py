@@ -27,12 +27,15 @@ class AnalyzeVideo(object):
     """
 
     def __init__(self):
+        self.mps_device = None
         if not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
                 print("MPS not available because the current PyTorch install was not "
                    "built with MPS enabled.")
             else:
                 print("MPS not available because the current MacOS version is not 12.3+ " + "and/or you do not have an MPS-enabled device on this machine.")
+        elif torch.cuda.is_available():
+            self.mps_device = torch.device("cuda")
         else:
             self.mps_device = torch.device("mps")
         self.fourcc = cv2.VideoWriter_fourcc(*'vp09')
@@ -94,6 +97,8 @@ class AnalyzeVideo(object):
             if os.path.isfile(output_file_name):
                 result = self.upload_to_s3(output_file_name)
                 logging.debug("Processs done %s", output_file_name)
+                self.r.publish(common.PUB_SUB_CHANNEL, 
+                               "{output_file_name: Done}")
             else:
                 raise Exception("File creation failed")
             return result
@@ -103,7 +108,7 @@ class AnalyzeVideo(object):
 
     
 
-    def get_youtube_video(self, url, pose_flag, web_flag):
+    def get_youtube_video(self, url, pose_flag, web_flag, out_yt_file):
         """Used for processing online youtube videos
 
         Args:
@@ -111,9 +116,7 @@ class AnalyzeVideo(object):
             model (_type_): _description_
         """
         cap = cap_from_youtube(url, '')
-        
-        output_file = "fed_out.mp4"
-        out = cv2.VideoWriter(output_file, self.fourcc, self.fps, (int(cap.get(3)), int(cap.get(4))))
+        out = cv2.VideoWriter(out_yt_file, self.fourcc, self.fps, (int(cap.get(3)), int(cap.get(4))))
         while True:
             ret, frame = cap.read()
             if ret:
@@ -122,13 +125,7 @@ class AnalyzeVideo(object):
                     result = self.overlay_poses(frame, model)
                     if web_flag:
                         if result.any():
-                            ret, buffer = cv2.imencode('.jpg', result)
                             out.write(result)
-                        else:
-                            ret, buffer = cv2.imencode('.jpg', frame)
-                        frame = buffer.tobytes()
-                        yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
                     else:
                         cv2.imshow("Frame", result)
                 else:
@@ -137,6 +134,7 @@ class AnalyzeVideo(object):
             else:
                 break
         cap.release()
+        out.release()
 
 
     def calculate_racket_and_ball_distance(self, r_centre, b_centre):
