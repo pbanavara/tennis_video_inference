@@ -54,7 +54,7 @@ def root():
 def get_hash_of_file(input_str):
     hash = hashlib.new('SHA256', bytes(input_str, encoding="utf-8")).digest()
     b32_hash = base64.b32encode(hash).lower().rstrip(b'=').decode()[:10]
-    out_file_name = b32_hash + ".webm"
+    out_file_name = b32_hash + ".m4v"
     return out_file_name 
 
 
@@ -74,8 +74,8 @@ async def upload_video(background_tasks: BackgroundTasks,
     temp = NamedTemporaryFile("wb", dir="/tmp", delete=False)
     r.lpush("emails", email)
     out_file_name = get_out_file_name(email, file.filename)
-    if bytes(out_file_name, 'utf-8') in r.lrange(email, 0, -1):
-        return {"email": email, "out_file" : out_file_name}
+    #if bytes(out_file_name, 'utf-8') in r.lrange(email, 0, -1):
+    #    return {"email": email, "out_file" : out_file_name}
     try:
         contents = file.file.read()
         with temp as f:

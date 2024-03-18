@@ -18,6 +18,7 @@ import botocore
 import common
 import os
 import redis
+from pybboxes import BoundingBox
 
 class AnalyzeVideo(object):
     """Main class for processing and overlaying pose, mask or object detection on the main video
@@ -67,9 +68,16 @@ class AnalyzeVideo(object):
         """
         cap = cv2.VideoCapture(video_mov)
         fps = cap.get(cv2.CAP_PROP_FPS)
-        self.fps = fps * 0.30
+        self.fps = fps * 0.15
+        # By default the codec is for webm but for m4v a different codec is needed
+        if output_file_name.split(".")[1] == "m4v":
+            self.fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+
         out = cv2.VideoWriter(output_file_name, self.fourcc, self.fps, (int(cap.get(3)), int(cap.get(4))))
         count = 0
+
+        output_images = []
+        t_start = time.time()
         while cap.isOpened():
             ret, frame = cap.read()
             if ret:
@@ -82,17 +90,37 @@ class AnalyzeVideo(object):
                     if web_flag:
                         if result.any():
                             out.write(result)
+                            #file_name = start_file + str(count) + ".jpg"
+                            #cv2.imwrite(file_name, result)
+                            #output_images.append(result)
                             count += 1
-                        else:
-                            out.write(frame)
                     else:
                         logging.debug("Encoding failed")
                         cv2.imshow("Frame", result)
             else:
                  break
 
+        t_end = time.time()
+        logging.debug("Processing time %s", t_end - t_start)
         cap.release()
-        out.release()
+        min_h, min_w = float("inf"), float("inf")
+        if len(output_images) > 0:
+            max_w, max_h = 0, 0
+            for img in output_images:
+                max_w = max(max_w, img.shape[1])
+                max_h = max(max_h, img.shape[0]) 
+                min_w = min(min_w, img.shape[1])
+                min_h = min(min_h, img.shape[0]) 
+            max_w = (max_w + min_w) // 2
+            max_h = (max_h + min_h) // 2
+            out = cv2.VideoWriter(output_file_name, self.fourcc, self.fps, 
+                                  (max_w, max_h))
+            for img in output_images:
+                img_2 = cv2.resize(img, (max_w, max_h), 
+                                   interpolation=cv2.INTER_AREA)
+                out.write(img_2)
+            print("Done writing")
+            out.release()
         try:
             if os.path.isfile(output_file_name):
                 result = self.upload_to_s3(output_file_name)
@@ -106,8 +134,6 @@ class AnalyzeVideo(object):
             logging.debug(e)
             raise Exception(e)
 
-    
-
     def get_youtube_video(self, url, pose_flag, web_flag, out_yt_file):
         """Used for processing online youtube videos
 
@@ -116,7 +142,17 @@ class AnalyzeVideo(object):
             model (_type_): _description_
         """
         cap = cap_from_youtube(url, '')
-        out = cv2.VideoWriter(out_yt_file, self.fourcc, self.fps, (int(cap.get(3)), int(cap.get(4))))
+        # Just to get the cropped video dimensions right
+        ret, frame = cap.read()
+        if ret:
+            if pose_flag:
+                model = self.choose_model(True)
+                result = self.overlay_poses(frame, model)
+                w, h, c = result.shape()
+                out = cv2.VideoWriter(out_yt_file, self.fourcc, self.fps, (w, h))
+
+
+
         while True:
             ret, frame = cap.read()
             if ret:
@@ -233,15 +269,22 @@ class AnalyzeVideo(object):
         return angle
     
     def draw_angle_line(self, ann, angle, start, mid, end, color):
-        cv2.circle(ann.result(), start, 5, (255, 255, 255), 2)
-        cv2.circle(ann.result(), mid, 5, (255, 255, 255), 2)
-        cv2.circle(ann.result(), end, 5, (255, 255, 255), 2)
-        cv2.line(ann.result(), start, mid, color, thickness=2, lineType=cv2.LINE_AA)
-        cv2.line(ann.result(), mid, end, color, thickness=2, lineType=cv2.LINE_AA)
-        cv2.putText(ann.result(), str(int(angle)), (mid[0], mid[1]), cv2.FONT_HERSHEY_PLAIN, 2, (255,255,255), 1)
+        cv2.circle(ann.result(), start, 2, (255, 255, 255), 1)
+        cv2.circle(ann.result(), mid, 2, (255, 255, 255), 1)
+        cv2.circle(ann.result(), end, 2, (255, 255, 255), 1)
+        cv2.line(ann.result(), start, mid, color, thickness=1, lineType=cv2.LINE_AA)
+        cv2.line(ann.result(), mid, end, color, thickness=1, lineType=cv2.LINE_AA)
+        cv2.putText(ann.result(), str(int(angle)), (mid[0], mid[1]), cv2.FONT_HERSHEY_PLAIN, 1, (255,255,255), 1)
         #cv2.imshow("Annotated frame", ann.result())
         # Check the angle and tell the difference
         return ann.result()
+
+    def bnd_box_to_yolo_line(self, box, img_size):
+        coco_bbox = BoundingBox.from_yolo(*box)
+        coco_bbox.image_size = img_size
+        res = coco_bbox.to_yolo()
+        print("Amazin", res)
+        return res.x_tl, res.y_tl, res.x_br, res.y_br 
 
 
     def overlay_poses(self, frame, model):
@@ -261,6 +304,8 @@ class AnalyzeVideo(object):
 
         results = model(frame, device=self.mps_device)
         names = results[0].boxes.cls
+        boxes = results[0].boxes
+
 
         keypoints = results[0].keypoints.xy.cpu().numpy()[0]
         keypoints = [[int(k[0]), int(k[1])] for k in keypoints]
@@ -276,15 +321,19 @@ class AnalyzeVideo(object):
 
             #draw_angle_line(ann, left_angle, keypoints[5], keypoints[7], keypoints[9])
             result = self.draw_angle_line(ann, right_hand_angle, keypoints[6], keypoints[8], keypoints[10], [255, 255, 250])
-            
             result = self.draw_angle_line(ann, right_leg_angle, keypoints[12], keypoints[14], keypoints[16], [255, 255, 240] )
             result = self.draw_angle_line(ann, left_leg_angle, keypoints[11], keypoints[13], keypoints[15], [255, 255, 230] )
                 #draw_angle_line(ann, left_hip_angle, keypoints[5], keypoints[6], keypoints[11], [255, 255, 220] )
             result = self.draw_angle_line(ann, left_hip_angle, keypoints[6], keypoints[11], keypoints[13], [255, 255, 220] )
+            for box in boxes:
+                x_tl, y_tl, x_br, y_br = np.array(box.xyxy.cpu(), dtype=int).squeeze()
 
-            if right_hand_angle > 10:
-                cv2.putText(result, "Right hand is bent during forehand", (keypoints[8][0], keypoints[8][1]), cv2.FONT_HERSHEY_PLAIN, 2, (100,100,100), 1)
-
+                # Increase the width and height proportionally to accomodate for anomalies
+                x_tl -= (x_tl // 4) 
+                y_tl -= (y_tl // 8)
+                x_br += (x_br // 8) 
+            #cv2.rectangle(result, (x_tl, y_tl), (x_br, y_br), (127,0,75), 1)
+            #result = result[y_tl: y_tl + (y_br - y_tl), x_tl: x_tl + (x_br - x_tl)]
             k = cv2.waitKey(1)
             if k == ord('p'):
                 cv2.waitKey(-1)
